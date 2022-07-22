@@ -26,7 +26,7 @@ contract ParrotRewards is IParrotRewards, Ownable {
   uint256 public totalSharesForRewards; // will be all tokens eligible to receive rewards (i.e. checks exclusion)
 
   // amount of shares a user has
-  mapping(address => Share) shares;
+  mapping(address => Share) public shares;
   // reward information per user
   mapping(address => Reward) public rewards;
 
@@ -54,7 +54,9 @@ contract ParrotRewards is IParrotRewards, Ownable {
 
   function lock(uint256 _amount) external {
     address shareholder = msg.sender;
-    IERC20(shareholderToken).transferFrom(shareholder, address(this), _amount);
+    IERC20 tokenContract = IERC20(shareholderToken);
+    _amount = _amount == 0 ? tokenContract.balanceOf(shareholder) : _amount;
+    tokenContract.transferFrom(shareholder, address(this), _amount);
     _addShares(shareholder, _amount);
   }
 
@@ -71,7 +73,7 @@ contract ParrotRewards is IParrotRewards, Ownable {
       _amount <= shares[shareholder].amountActual,
       'cannot unlock more than you have locked'
     );
-    IERC20(shareholderToken).transferFrom(address(this), shareholder, _amount);
+    IERC20(shareholderToken).transfer(shareholder, _amount);
     _removeShares(shareholder, _amount);
   }
 
@@ -105,6 +107,9 @@ contract ParrotRewards is IParrotRewards, Ownable {
     totalSharesForRewards -= shares[shareholder].isExcluded ? 0 : amount;
     shares[shareholder].amount -= shares[shareholder].isExcluded ? 0 : amount;
     shares[shareholder].amountActual -= amount;
+    if (shares[shareholder].amountActual == 0) {
+      totalLockedUsers--;
+    }
     rewards[shareholder].totalExcluded = getCumulativeRewards(
       shares[shareholder].amountActual
     );

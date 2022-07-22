@@ -140,8 +140,13 @@ contract Parrot is ERC20, Ownable {
       );
     }
 
-    uint256 _minSwap = (balanceOf(_marketMakingPair) * liquifyRate) /
-      PERCENT_DENOMENATOR;
+    uint256 _minSwap = totalSupply();
+    if (_marketMakingPair != address(0)) {
+      _minSwap =
+        (balanceOf(_marketMakingPair) * liquifyRate) /
+        PERCENT_DENOMENATOR;
+      _minSwap = _minSwap == 0 ? totalSupply() : _minSwap;
+    }
     bool _overMin = tokensForDevelopment +
       tokensForTreasury +
       tokensForLiquidity >=
