@@ -300,16 +300,11 @@ contract Parrot is ERC20, Ownable {
           _latestBalance;
         tokensForTreasury = _areExcessMoreThanBal ? 0 : tokensForTreasury;
         tokensForDevelopment = _areExcessMoreThanBal ? 0 : tokensForDevelopment;
-        tokensForLiquidity =
-          _latestBalance -
-          tokensForTreasury -
-          tokensForDevelopment;
-      } else {
-        tokensForLiquidity =
-          _latestBalance -
-          tokensForTreasury -
-          tokensForDevelopment;
       }
+      tokensForLiquidity =
+        _latestBalance -
+        tokensForTreasury -
+        tokensForDevelopment;
     }
   }
 
