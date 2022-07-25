@@ -69,7 +69,7 @@ contract ParrotRewards is IParrotRewards, Ownable {
     _removeShares(shareholder, _amount);
   }
 
-  function _addShares(address shareholder, uint256 amount) private {
+  function _addShares(address shareholder, uint256 amount) internal {
     _distributeReward(shareholder);
 
     uint256 sharesBefore = shares[shareholder].amount;
@@ -86,7 +86,7 @@ contract ParrotRewards is IParrotRewards, Ownable {
     );
   }
 
-  function _removeShares(address shareholder, uint256 amount) private {
+  function _removeShares(address shareholder, uint256 amount) internal {
     amount = amount == 0 ? shares[shareholder].amount : amount;
     require(
       shares[shareholder].amountActual > 0 &&
@@ -109,11 +109,8 @@ contract ParrotRewards is IParrotRewards, Ownable {
 
   function depositRewards() external payable override {
     uint256 amount = msg.value;
-    require(amount > 0, 'value must be greater than 0');
-    require(
-      totalSharesForRewards > 0,
-      'must be shares deposited to be given rewards'
-    );
+    require(amount > 0, 'must provide ETH to deposit');
+    require(totalSharesForRewards > 0, 'must be shares deposited');
 
     totalRewards += amount;
     rewardsPerShare += (ACC_FACTOR * amount) / totalSharesForRewards;
