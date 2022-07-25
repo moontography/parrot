@@ -270,17 +270,17 @@ contract Parrot is ERC20, Ownable {
     uint256 _liquidityETH,
     uint256 _liquidityTokens
   ) private {
-    address _developmentWallet = developmentWallet == address(0)
-      ? owner()
-      : developmentWallet;
     if (_developmentETH > 0) {
+      address _developmentWallet = developmentWallet == address(0)
+        ? owner()
+        : developmentWallet;
       payable(_developmentWallet).call{ value: _developmentETH }('');
     }
 
-    address _treasuryWallet = treasuryWallet == address(0)
-      ? owner()
-      : treasuryWallet;
     if (_treasuryETH > 0) {
+      address _treasuryWallet = treasuryWallet == address(0)
+        ? owner()
+        : treasuryWallet;
       payable(_treasuryWallet).call{ value: _treasuryETH }('');
     }
 

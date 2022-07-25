@@ -7,9 +7,9 @@ import './interfaces/IParrotRewards.sol';
 
 contract ParrotRewards is IParrotRewards, Ownable {
   struct Reward {
-    uint256 totalExcluded; // excluded reward
+    uint256 totalExcluded;
     uint256 totalRealised;
-    uint256 lastClaim; // used for boosting logic
+    uint256 lastClaim;
   }
 
   struct Share {
@@ -39,14 +39,6 @@ contract ParrotRewards is IParrotRewards, Ownable {
   event ClaimReward(address wallet);
   event DistributeReward(address indexed wallet, address payable receiver);
   event DepositRewards(address indexed wallet, uint256 amountETH);
-
-  modifier onlyOrOwnerToken() {
-    require(
-      msg.sender == owner() || msg.sender == shareholderToken,
-      'must be owner or token contract'
-    );
-    _;
-  }
 
   constructor(address _shareholderToken) {
     shareholderToken = _shareholderToken;
@@ -116,16 +108,16 @@ contract ParrotRewards is IParrotRewards, Ownable {
   }
 
   function depositRewards() external payable override {
-    require(msg.value > 0, 'value must be greater than 0');
+    uint256 amount = msg.value;
+    require(amount > 0, 'value must be greater than 0');
     require(
       totalSharesForRewards > 0,
-      'must be shares deposited to be rewarded rewards'
+      'must be shares deposited to be given rewards'
     );
 
-    uint256 amount = msg.value;
     totalRewards += amount;
     rewardsPerShare += (ACC_FACTOR * amount) / totalSharesForRewards;
-    emit DepositRewards(msg.sender, msg.value);
+    emit DepositRewards(msg.sender, amount);
   }
 
   function _distributeReward(address shareholder) internal {
