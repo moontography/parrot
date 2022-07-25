@@ -6,11 +6,7 @@ interface IParrotRewards {
 
   function depositRewards() external payable;
 
-  function getRewardsShares(address wallet) external view returns (uint256);
-
   function getLockedShares(address wallet) external view returns (uint256);
-
-  function setIsRewardsExcluded(address shareholder, bool isExcluded) external;
 
   function lock(uint256 amount) external;
 

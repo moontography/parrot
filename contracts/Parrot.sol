@@ -340,8 +340,8 @@ contract Parrot is ERC20, Ownable {
     buyLiquidityFee = _liquidityFee;
     buyTotalFees = buyDevelopmentFee + buyTreasuryFee + buyLiquidityFee;
     require(
-      buyTotalFees <= (PERCENT_DENOMENATOR * 35) / 100,
-      'tax cannot be more than 35%'
+      buyTotalFees <= (PERCENT_DENOMENATOR * 15) / 100,
+      'tax cannot be more than 15%'
     );
   }
 
@@ -355,8 +355,8 @@ contract Parrot is ERC20, Ownable {
     sellLiquidityFee = _liquidityFee;
     sellTotalFees = sellDevelopmentFee + sellTreasuryFee + sellLiquidityFee;
     require(
-      sellTotalFees <= (PERCENT_DENOMENATOR * 35) / 100,
-      'tax cannot be more than 35%'
+      sellTotalFees <= (PERCENT_DENOMENATOR * 15) / 100,
+      'tax cannot be more than 15%'
     );
   }
 

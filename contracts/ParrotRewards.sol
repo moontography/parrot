@@ -6,6 +6,9 @@ import '@openzeppelin/contracts/interfaces/IERC20.sol';
 import './interfaces/IParrotRewards.sol';
 
 contract ParrotRewards is IParrotRewards, Ownable {
+  uint256 private constant ONE_DAY = 60 * 60 * 24;
+  int256 private constant OFFSET19700101 = 2440588;
+
   struct Reward {
     uint256 totalExcluded;
     uint256 totalRealised;
@@ -13,17 +16,17 @@ contract ParrotRewards is IParrotRewards, Ownable {
   }
 
   struct Share {
-    uint256 amount; // used to keep track of rewards owed to users and will change if user is/is not excluded
-    uint256 amountActual; // number of user's tokens in the contract, will only change when tokens change hands
+    uint256 amount;
     uint256 lockedTime;
-    bool isExcluded;
   }
 
   uint256 public timeLock = 30 days;
   address public shareholderToken;
   uint256 public totalLockedUsers;
-  uint256 public totalSharesDeposited; // will be all tokens locked, regardless of reward exclusion status
-  uint256 public totalSharesForRewards; // will be all tokens eligible to receive rewards (i.e. checks exclusion)
+  uint256 public totalSharesDeposited;
+
+  uint8 minDayOfMonthCanLock = 1;
+  uint8 maxDayOfMonthCanLock = 5;
 
   // amount of shares a user has
   mapping(address => Share) public shares;
@@ -45,6 +48,12 @@ contract ParrotRewards is IParrotRewards, Ownable {
   }
 
   function lock(uint256 _amount) external {
+    uint256 _currentDayOfMonth = _dayOfMonth(block.timestamp);
+    require(
+      _currentDayOfMonth >= minDayOfMonthCanLock &&
+        _currentDayOfMonth <= maxDayOfMonthCanLock,
+      'outside of allowed lock window'
+    );
     address shareholder = msg.sender;
     IERC20 tokenContract = IERC20(shareholderToken);
     _amount = _amount == 0 ? tokenContract.balanceOf(shareholder) : _amount;
@@ -55,14 +64,13 @@ contract ParrotRewards is IParrotRewards, Ownable {
   function unlock(uint256 _amount) external {
     address shareholder = msg.sender;
     require(
-      shares[shareholder].isExcluded ||
-        block.timestamp >= shares[shareholder].lockedTime + timeLock,
+      block.timestamp >= shares[shareholder].lockedTime + timeLock,
       'must wait the time lock before unstaking'
     );
-    _amount = _amount == 0 ? shares[shareholder].amountActual : _amount;
+    _amount = _amount == 0 ? shares[shareholder].amount : _amount;
     require(_amount > 0, 'need tokens to unlock');
     require(
-      _amount <= shares[shareholder].amountActual,
+      _amount <= shares[shareholder].amount,
       'cannot unlock more than you have locked'
     );
     IERC20(shareholderToken).transfer(shareholder, _amount);
@@ -74,47 +82,45 @@ contract ParrotRewards is IParrotRewards, Ownable {
 
     uint256 sharesBefore = shares[shareholder].amount;
     totalSharesDeposited += amount;
-    totalSharesForRewards += shares[shareholder].isExcluded ? 0 : amount;
-    shares[shareholder].amount += shares[shareholder].isExcluded ? 0 : amount;
-    shares[shareholder].amountActual += amount;
+    shares[shareholder].amount += amount;
     shares[shareholder].lockedTime = block.timestamp;
     if (sharesBefore == 0 && shares[shareholder].amount > 0) {
       totalLockedUsers++;
     }
     rewards[shareholder].totalExcluded = getCumulativeRewards(
-      shares[shareholder].amountActual
+      shares[shareholder].amount
     );
   }
 
   function _removeShares(address shareholder, uint256 amount) internal {
     amount = amount == 0 ? shares[shareholder].amount : amount;
     require(
-      shares[shareholder].amountActual > 0 &&
-        amount <= shares[shareholder].amountActual,
+      shares[shareholder].amount > 0 && amount <= shares[shareholder].amount,
       'you can only unlock if you have some lockd'
     );
     _distributeReward(shareholder);
 
     totalSharesDeposited -= amount;
-    totalSharesForRewards -= shares[shareholder].isExcluded ? 0 : amount;
-    shares[shareholder].amount -= shares[shareholder].isExcluded ? 0 : amount;
-    shares[shareholder].amountActual -= amount;
-    if (shares[shareholder].amountActual == 0) {
+    shares[shareholder].amount -= amount;
+    if (shares[shareholder].amount == 0) {
       totalLockedUsers--;
     }
     rewards[shareholder].totalExcluded = getCumulativeRewards(
-      shares[shareholder].amountActual
+      shares[shareholder].amount
     );
   }
 
-  function depositRewards() external payable override {
-    uint256 amount = msg.value;
-    require(amount > 0, 'must provide ETH to deposit');
-    require(totalSharesForRewards > 0, 'must be shares deposited');
+  function depositRewards() public payable override {
+    _depositRewards(msg.value);
+  }
 
-    totalRewards += amount;
-    rewardsPerShare += (ACC_FACTOR * amount) / totalSharesForRewards;
-    emit DepositRewards(msg.sender, amount);
+  function _depositRewards(uint256 _amount) internal {
+    require(_amount > 0, 'must provide ETH to deposit');
+    require(totalSharesDeposited > 0, 'must be shares deposited');
+
+    totalRewards += _amount;
+    rewardsPerShare += (ACC_FACTOR * _amount) / totalSharesDeposited;
+    emit DepositRewards(msg.sender, _amount);
   }
 
   function _distributeReward(address shareholder) internal {
@@ -126,7 +132,7 @@ contract ParrotRewards is IParrotRewards, Ownable {
 
     rewards[shareholder].totalRealised += amount;
     rewards[shareholder].totalExcluded = getCumulativeRewards(
-      shares[shareholder].amountActual
+      shares[shareholder].amount
     );
     rewards[shareholder].lastClaim = block.timestamp;
 
@@ -140,6 +146,37 @@ contract ParrotRewards is IParrotRewards, Ownable {
     }
   }
 
+  function _dayOfMonth(uint256 _timestamp) internal pure returns (uint256) {
+    (, , uint256 day) = _daysToDate(_timestamp / ONE_DAY);
+    return day;
+  }
+
+  // date conversion algorithm from http://aa.usno.navy.mil/faq/docs/JD_Formula.php
+  function _daysToDate(uint256 _days)
+    internal
+    pure
+    returns (
+      uint256,
+      uint256,
+      uint256
+    )
+  {
+    int256 __days = int256(_days);
+
+    int256 L = __days + 68569 + OFFSET19700101;
+    int256 N = (4 * L) / 146097;
+    L = L - (146097 * N + 3) / 4;
+    int256 _year = (4000 * (L + 1)) / 1461001;
+    L = L - (1461 * _year) / 4 + 31;
+    int256 _month = (80 * L) / 2447;
+    int256 _day = L - (2447 * _month) / 80;
+    L = _month / 11;
+    _month = _month + 2 - 12 * L;
+    _year = 100 * (N - 49) + _year + L;
+
+    return (uint256(_year), uint256(_month), uint256(_day));
+  }
+
   function claimReward() external override {
     _distributeReward(msg.sender);
     emit ClaimReward(msg.sender);
@@ -151,9 +188,7 @@ contract ParrotRewards is IParrotRewards, Ownable {
       return 0;
     }
 
-    uint256 earnedRewards = getCumulativeRewards(
-      shares[shareholder].amountActual
-    );
+    uint256 earnedRewards = getCumulativeRewards(shares[shareholder].amount);
     uint256 rewardsExcluded = rewards[shareholder].totalExcluded;
     if (earnedRewards <= rewardsExcluded) {
       return 0;
@@ -166,7 +201,7 @@ contract ParrotRewards is IParrotRewards, Ownable {
     return (share * rewardsPerShare) / ACC_FACTOR;
   }
 
-  function getRewardsShares(address user)
+  function getLockedShares(address user)
     external
     view
     override
@@ -175,43 +210,22 @@ contract ParrotRewards is IParrotRewards, Ownable {
     return shares[user].amount;
   }
 
-  function getLockedShares(address user)
-    external
-    view
-    override
-    returns (uint256)
-  {
-    return shares[user].amountActual;
+  function setMinDayOfMonthCanLock(uint8 _day) external onlyOwner {
+    require(_day <= maxDayOfMonthCanLock, 'can set min day above max day');
+    minDayOfMonthCanLock = _day;
   }
 
-  function setIsRewardsExcluded(address shareholder, bool isExcluded)
-    external
-    onlyOwner
-  {
-    require(
-      shares[shareholder].isExcluded != isExcluded,
-      'can only change exclusion status from what it is not already'
-    );
-    shares[shareholder].isExcluded = isExcluded;
-
-    // distribute any outstanding rewards for the excluded user and
-    // adjust the total rewards shares for the next reward deposit
-    // to be accurately calculated
-    if (isExcluded) {
-      _distributeReward(shareholder);
-      totalSharesForRewards -= shares[shareholder].amountActual;
-      totalLockedUsers--;
-    } else {
-      totalSharesForRewards += shares[shareholder].amountActual;
-      totalLockedUsers++;
-    }
-    shares[shareholder].amount = isExcluded
-      ? 0
-      : shares[shareholder].amountActual;
+  function setMaxDayOfMonthCanLock(uint8 _day) external onlyOwner {
+    require(_day >= minDayOfMonthCanLock, 'can set max day below min day');
+    maxDayOfMonthCanLock = _day;
   }
 
   function setTimeLock(uint256 numSec) external onlyOwner {
     require(numSec <= 365 days, 'must be less than a year');
     timeLock = numSec;
+  }
+
+  receive() external payable {
+    _depositRewards(msg.value);
   }
 }
