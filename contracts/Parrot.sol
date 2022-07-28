@@ -61,7 +61,7 @@ contract Parrot is ERC20, Ownable {
     _swapping = false;
   }
 
-  constructor(address _usdc) ERC20('Parrot2', 'PRT2') {
+  constructor(address _usdc) ERC20('Parrot', 'PRT') {
     _mint(msg.sender, 1_000_000_000 * 10**18);
 
     IUniswapV2Router02 _uniswapV2Router = IUniswapV2Router02(DEX_ROUTER);
