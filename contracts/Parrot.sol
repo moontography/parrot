@@ -6,14 +6,17 @@ import '@openzeppelin/contracts/access/Ownable.sol';
 import '@uniswap/v2-core/contracts/interfaces/IUniswapV2Factory.sol';
 import '@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol';
 import '@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol';
+import './FeeProcessor.sol';
 import './ParrotRewards.sol';
 
 contract Parrot is ERC20, Ownable {
   uint256 private constant PERCENT_DENOMENATOR = 1000;
+  address private constant DEX_ROUTER =
+    0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D;
 
-  address public developmentWallet;
-  address public treasuryWallet;
-  address public liquidityWallet;
+  // address public developmentWallet;
+  // address public treasuryWallet;
+  // address public liquidityWallet;
 
   uint256 public buyDevelopmentFee = 20; // 2%
   uint256 public buyTreasuryFee = 20; // 2%
@@ -31,6 +34,7 @@ contract Parrot is ERC20, Ownable {
   uint256 public tokensForTreasury;
   uint256 public tokensForLiquidity;
 
+  FeeProcessor private _feeProcessor;
   ParrotRewards private _rewards;
   mapping(address => bool) private _isTaxExcluded;
   bool private _taxesOff;
@@ -40,9 +44,9 @@ contract Parrot is ERC20, Ownable {
   uint256 public maxWallet;
   mapping(address => bool) public isExcludedMaxWallet;
 
-  uint256 public liquifyRate = 10; // 1% of LP balance
-  uint256 public launchTime;
+  uint256 public liquifyRate = 5; // 0.5% of LP balance
 
+  address public USDC;
   address public uniswapV2Pair;
   IUniswapV2Router02 public uniswapV2Router;
   mapping(address => bool) public marketMakingPairs;
@@ -57,14 +61,13 @@ contract Parrot is ERC20, Ownable {
     _swapping = false;
   }
 
-  constructor() ERC20('Parrot', 'PRT') {
+  constructor(address _usdc) ERC20('Parrot2', 'PRT2') {
     _mint(msg.sender, 1_000_000_000 * 10**18);
 
-    IUniswapV2Router02 _uniswapV2Router = IUniswapV2Router02(
-      0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D
-    );
+    IUniswapV2Router02 _uniswapV2Router = IUniswapV2Router02(DEX_ROUTER);
     address _uniswapV2Pair = IUniswapV2Factory(_uniswapV2Router.factory())
-      .createPair(address(this), _uniswapV2Router.WETH());
+      .createPair(address(this), _usdc);
+    USDC = _usdc;
     marketMakingPairs[_uniswapV2Pair] = true;
     uniswapV2Pair = _uniswapV2Pair;
     uniswapV2Router = _uniswapV2Router;
@@ -72,19 +75,19 @@ contract Parrot is ERC20, Ownable {
     maxTxnAmount = (totalSupply() * 1) / 100; // 1% supply
     maxWallet = (totalSupply() * 1) / 100; // 1% supply
 
+    _feeProcessor = new FeeProcessor(address(this), USDC, DEX_ROUTER);
+    _feeProcessor.transferOwnership(msg.sender);
     _rewards = new ParrotRewards(address(this));
     _rewards.transferOwnership(msg.sender);
     _isTaxExcluded[address(this)] = true;
+    _isTaxExcluded[address(_feeProcessor)] = true;
     _isTaxExcluded[msg.sender] = true;
     isExcludedMaxTxnAmount[address(this)] = true;
+    isExcludedMaxTxnAmount[address(_feeProcessor)] = true;
     isExcludedMaxTxnAmount[msg.sender] = true;
     isExcludedMaxWallet[address(this)] = true;
+    isExcludedMaxWallet[address(_feeProcessor)] = true;
     isExcludedMaxWallet[msg.sender] = true;
-  }
-
-  function startTrading() external onlyOwner {
-    require(launchTime == 0, 'cannot already be launched');
-    launchTime = block.timestamp;
   }
 
   function _transfer(
@@ -105,12 +108,8 @@ contract Parrot is ERC20, Ownable {
     }
 
     if (_isSwap) {
-      if (block.timestamp == launchTime) {
-        _isBlacklisted[recipient] = true;
-      } else if (_isBuy) {
+      if (_isBuy) {
         // buy
-        require(launchTime > 0, 'we have not launched yet');
-
         _marketMakingPair = sender;
 
         if (!isExcludedMaxTxnAmount[recipient]) {
@@ -151,19 +150,12 @@ contract Parrot is ERC20, Ownable {
       tokensForTreasury +
       tokensForLiquidity >=
       _minSwap;
-    if (
-      _swapEnabled &&
-      !_swapping &&
-      _overMin &&
-      launchTime != 0 &&
-      sender != _marketMakingPair
-    ) {
+    if (_swapEnabled && !_swapping && _overMin && sender != _marketMakingPair) {
       _swap(_minSwap);
     }
 
     uint256 tax = 0;
     if (
-      launchTime != 0 &&
       _isSwap &&
       !_taxesOff &&
       !(_isTaxExcluded[sender] || _isTaxExcluded[recipient])
@@ -183,6 +175,8 @@ contract Parrot is ERC20, Ownable {
       if (tax > 0) {
         super._transfer(sender, address(this), tax);
       }
+
+      _trueUpTaxTokens();
     }
 
     super._transfer(sender, recipient, amount - tax);
@@ -210,83 +204,36 @@ contract Parrot is ERC20, Ownable {
       _tokensForDevelopment = _remaining - _tokensForTreasury;
     }
 
-    uint256 _balBefore = address(this).balance;
     uint256 _liquidityTokens = _tokensForLiquidity / 2;
     uint256 _finalAmountToSwap = _tokensForDevelopment +
       _tokensForTreasury +
       _liquidityTokens;
 
-    // generate the uniswap pair path of token -> weth
+    // generate the uniswap pair path of token -> USDC
     address[] memory path = new address[](2);
     path[0] = address(this);
-    path[1] = uniswapV2Router.WETH();
+    path[1] = USDC;
 
     _approve(address(this), address(uniswapV2Router), _finalAmountToSwap);
-    uniswapV2Router.swapExactTokensForETHSupportingFeeOnTransferTokens(
+    uniswapV2Router.swapExactTokensForTokensSupportingFeeOnTransferTokens(
       _finalAmountToSwap,
       0,
       path,
-      address(this),
+      address(_feeProcessor),
       block.timestamp
     );
-
-    uint256 balToProcess = address(this).balance - _balBefore;
-    if (balToProcess > 0) {
-      uint256 _treasuryETH = (balToProcess * _tokensForTreasury) /
-        _finalAmountToSwap;
-      uint256 _developmentETH = (balToProcess * _tokensForDevelopment) /
-        _finalAmountToSwap;
-      uint256 _liquidityETH = balToProcess - _treasuryETH - _developmentETH;
-      _processFees(
-        _developmentETH,
-        _treasuryETH,
-        _liquidityETH,
-        _liquidityTokens
-      );
+    if (_liquidityTokens > 0) {
+      super._transfer(address(this), address(_feeProcessor), _liquidityTokens);
     }
+    _feeProcessor.processAndDistribute(
+      _tokensForDevelopment,
+      _tokensForTreasury,
+      _liquidityTokens
+    );
 
     tokensForDevelopment -= _tokensForDevelopment;
     tokensForTreasury -= _tokensForTreasury;
     tokensForLiquidity -= _tokensForLiquidity;
-
-    _trueUpTaxTokens();
-  }
-
-  function _addLp(uint256 tokenAmount, uint256 ethAmount) private {
-    _approve(address(this), address(uniswapV2Router), tokenAmount);
-    uniswapV2Router.addLiquidityETH{ value: ethAmount }(
-      address(this),
-      tokenAmount,
-      0,
-      0,
-      liquidityWallet == address(0) ? owner() : liquidityWallet,
-      block.timestamp
-    );
-  }
-
-  function _processFees(
-    uint256 _developmentETH,
-    uint256 _treasuryETH,
-    uint256 _liquidityETH,
-    uint256 _liquidityTokens
-  ) private {
-    if (_developmentETH > 0) {
-      address _developmentWallet = developmentWallet == address(0)
-        ? owner()
-        : developmentWallet;
-      payable(_developmentWallet).call{ value: _developmentETH }('');
-    }
-
-    if (_treasuryETH > 0) {
-      address _treasuryWallet = treasuryWallet == address(0)
-        ? owner()
-        : treasuryWallet;
-      payable(_treasuryWallet).call{ value: _treasuryETH }('');
-    }
-
-    if (_liquidityETH > 0 && _liquidityTokens > 0) {
-      _addLp(_liquidityTokens, _liquidityETH);
-    }
   }
 
   function _trueUpTaxTokens() internal {
@@ -306,6 +253,10 @@ contract Parrot is ERC20, Ownable {
         tokensForTreasury -
         tokensForDevelopment;
     }
+  }
+
+  function feeProcessor() external view returns (address) {
+    return address(_feeProcessor);
   }
 
   function rewardsContract() external view returns (address) {
@@ -362,18 +313,6 @@ contract Parrot is ERC20, Ownable {
 
   function setMarketMakingPair(address _addy, bool _isPair) external onlyOwner {
     marketMakingPairs[_addy] = _isPair;
-  }
-
-  function setDevelopmentWallet(address _wallet) external onlyOwner {
-    developmentWallet = _wallet;
-  }
-
-  function setTreasuryWallet(address _wallet) external onlyOwner {
-    treasuryWallet = _wallet;
-  }
-
-  function setLiquidityWallet(address _wallet) external onlyOwner {
-    liquidityWallet = _wallet;
   }
 
   function setMaxTxnAmount(uint256 _numTokens) external onlyOwner {
@@ -436,10 +375,4 @@ contract Parrot is ERC20, Ownable {
     require(_amount > 0, 'make sure there is a balance available to withdraw');
     _token.transfer(owner(), _amount);
   }
-
-  function withdrawETH() external onlyOwner {
-    payable(owner()).call{ value: address(this).balance }('');
-  }
-
-  receive() external payable {}
 }
