@@ -14,10 +14,6 @@ contract Parrot is ERC20, Ownable {
   address private constant DEX_ROUTER =
     0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D;
 
-  // address public developmentWallet;
-  // address public treasuryWallet;
-  // address public liquidityWallet;
-
   uint256 public buyDevelopmentFee = 20; // 2%
   uint256 public buyTreasuryFee = 20; // 2%
   uint256 public buyLiquidityFee = 20; // 2%
