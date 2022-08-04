@@ -25,8 +25,8 @@ contract ParrotRewards is IParrotRewards, Ownable {
   uint256 public totalLockedUsers;
   uint256 public totalSharesDeposited;
 
-  uint8 minDayOfMonthCanLock = 1;
-  uint8 maxDayOfMonthCanLock = 5;
+  uint8 public minDayOfMonthCanLock = 1;
+  uint8 public maxDayOfMonthCanLock = 5;
 
   // amount of shares a user has
   mapping(address => Share) public shares;
