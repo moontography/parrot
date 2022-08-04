@@ -41,7 +41,6 @@ contract Parrot is ERC20, Ownable {
   mapping(address => bool) public isExcludedMaxWallet;
 
   uint256 public liquifyRate = 10; // 1% of LP balance
-  uint256 public launchTime;
 
   address public uniswapV2Pair;
   IUniswapV2Router02 public uniswapV2Router;
@@ -82,11 +81,6 @@ contract Parrot is ERC20, Ownable {
     isExcludedMaxWallet[msg.sender] = true;
   }
 
-  function startTrading() external onlyOwner {
-    require(launchTime == 0, 'cannot already be launched');
-    launchTime = block.timestamp;
-  }
-
   function _transfer(
     address sender,
     address recipient,
@@ -105,12 +99,8 @@ contract Parrot is ERC20, Ownable {
     }
 
     if (_isSwap) {
-      if (block.timestamp == launchTime) {
-        _isBlacklisted[recipient] = true;
-      } else if (_isBuy) {
+      if (_isBuy) {
         // buy
-        require(launchTime > 0, 'we have not launched yet');
-
         _marketMakingPair = sender;
 
         if (!isExcludedMaxTxnAmount[recipient]) {
@@ -151,19 +141,12 @@ contract Parrot is ERC20, Ownable {
       tokensForTreasury +
       tokensForLiquidity >=
       _minSwap;
-    if (
-      _swapEnabled &&
-      !_swapping &&
-      _overMin &&
-      launchTime != 0 &&
-      sender != _marketMakingPair
-    ) {
+    if (_swapEnabled && !_swapping && _overMin && sender != _marketMakingPair) {
       _swap(_minSwap);
     }
 
     uint256 tax = 0;
     if (
-      launchTime != 0 &&
       _isSwap &&
       !_taxesOff &&
       !(_isTaxExcluded[sender] || _isTaxExcluded[recipient])
