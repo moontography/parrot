@@ -169,6 +169,8 @@ contract Parrot is ERC20, Ownable {
     }
 
     super._transfer(sender, recipient, amount - tax);
+
+    _trueUpTaxTokens();
   }
 
   function _swap(uint256 _amountToSwap) private lockSwap {
@@ -231,8 +233,6 @@ contract Parrot is ERC20, Ownable {
     tokensForDevelopment -= _tokensForDevelopment;
     tokensForTreasury -= _tokensForTreasury;
     tokensForLiquidity -= _tokensForLiquidity;
-
-    _trueUpTaxTokens();
   }
 
   function _addLp(uint256 tokenAmount, uint256 ethAmount) private {
